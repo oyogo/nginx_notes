@@ -1,1 +1,1 @@
-# nginx_notes
+# Gentle introduction to nginx
