@@ -1,0 +1,298 @@
+---
+title: "Setting up nginx with shinyproxy"
+author: "oyogo"
+date: "2022-10-07"
+output: html_document
+---
+
+## Intro  
+nginx is an open source web server that can be used as a reverse proxy, load balancer, mail proxy and HTTP cache.  
+
+## Installation
+
+For mac : 
+
+```
+brew install nginx
+```
+
+for linux 
+
+```
+sudo apt update && sudo apt upgrade -y 
+
+sudo apt install nginx -y  
+
+```
+
+once the installation is done you can check the status of nginx as below.
+Note: NGINX is usually installed in the /etc/nginx directory and registered as a systemd service. 
+
+```
+sudo systemctl status nginx 
+
+```
+starting and stopping 
+for start
+```
+nginx # for mac 
+sudo systemctl start nginx # for linux 
+
+```
+for stop 
+```
+nginx -s stop  
+
+```
+
+To get the list of all running nginx processes use the following command
+
+```
+ps -ax | grep nginx 
+
+```
+
+## Configuration file's structure  
+The configuration files of nginx are located inside the /etc/nginx folder and they end with the _.conf_ extension. These files contain directives which control modules(the building blocks of nginx). 
+Directives can be further divided into;
+ * Simple directive. 
+ * Block directive.  
+ 
+To understand all that let's have a look at the contents of the default nginx config file.  
+Use your editor of choice to open it. 
+
+```
+sudo nano /etc/nginx/nginx.conf 
+
+``` 
+
+When you open the file, the content should be as below 
+
+```
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+        worker_connections 768;
+        # multi_accept on;
+}
+
+http {
+
+        ##
+        # Basic Settings
+        ##
+
+        sendfile on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 65;
+        types_hash_max_size 2048;
+        # server_tokens off;
+
+        # server_names_hash_bucket_size 64;
+        # server_name_in_redirect off;
+
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+
+        ##
+        # SSL Settings
+        ##
+
+        ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3; # Dropping SSLv3, ref: POODLE
+        ssl_prefer_server_ciphers on;
+
+        ##
+        # Logging Settings
+        ##
+
+        access_log /var/log/nginx/access.log;
+        error_log /var/log/nginx/error.log;
+
+        ##
+        # Gzip Settings
+        ##
+
+        gzip on;
+
+        # gzip_vary on;
+        # gzip_proxied any;
+        # gzip_comp_level 6;
+        # gzip_buffers 16 8k;
+        # gzip_http_version 1.1;
+        # gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+        ##
+        # Virtual Host Configs
+        ##
+
+        include /etc/nginx/conf.d/*.conf;
+        include /etc/nginx/sites-enabled/*;
+}
+
+
+#mail {
+#       # See sample authentication script at:
+#       # http://wiki.nginx.org/ImapAuthenticateWithApachePhpScript
+# 
+#       # auth_http localhost/auth.php;
+#       # pop3_capabilities "TOP" "USER";
+#       # imap_capabilities "IMAP4rev1" "UIDPLUS";
+# 
+#       server {
+#               listen     localhost:110;
+#               protocol   pop3;
+#               proxy      on;
+#       }
+# 
+#       server {
+#               listen     localhost:143;
+#               protocol   imap;
+#               proxy      on;
+#       }
+#}
+
+```
+
+To better understand the config file as shown above it's best to start writing the config file from scratch. 
+Rename the original config file as shown below and then create an empty one. 
+
+```
+# renames the original file
+sudo mv nginx.conf nginx.conf.original
+
+# create a new file
+sudo touch nginx.conf
+```
+
+Once you've created the nginx.conf open it up using the editor of your choice, personally I prefer nano.
+
+```
+sudo nano /etc/nginx/nginx.conf  
+
+```
+
+Edit the file to have its content as below
+
+```
+events {
+
+}
+
+http {
+
+    server {
+
+        listen 80;
+        return 200 "Hello World";
+    }
+
+}
+```
+
+Once you've made the edit on the nginx.conf file as above, do check if the file has any syntax mistake using the the command below. 
+_note: nginx won't run if there's any mistake._   
+
+```
+sudo nginx -t 
+```
+Once the check is done, you need to reload the nginx.conf file so that the changes are updated, failure to which nginx will work with the previous configuration. To achieve that use the command below.  
+
+```
+sudo nginx -s reload 
+
+```
+
+Confirm everything is okay, run the following command and your output should as shown below.  
+
+```
+user@nameofyourPC:/etc/nginx$ curl -i http://127.0.0.1 
+
+HTTP/1.1 200 OK
+Server: nginx/1.18.0 (Ubuntu)
+Date: Tue, 25 Oct 2022 09:29:50 GMT
+Content-Type: text/plain
+Content-Length: 12
+Connection: keep-alive
+
+Hello World
+```
+
+# Using nginx as a reverse proxy for shinyproxy
+Using nginx as a reverse proxy server simply means that nginx will seat between the client (browser) and a service running in a server, in this case the service is shinyproxy. So basically what happens is nginx will receive requests from the browser (sent to port 80) and then forward those requests to shinyproxy on port 8080 (this is the default port for shinyproxy). 
+We could have just opened port 8080 to the outside world but now for security reasons you might not want to do that, instead we'll have a reverse proxy (nginx) to see to it that the client will not talk directly to shinyproxy.  
+To achieve that edit the nginx.conf file to as below 
+
+```
+events {
+
+}
+
+http {
+
+    server {
+
+        listen 80;
+        #return 200 "Hello World\n";
+        location / {
+            proxy_pass http://localhost:8080;
+
+
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_read_timeout 600s;
+            proxy_redirect    off;
+            proxy_set_header  Host             $http_host;
+            proxy_set_header  X-Real-IP        $remote_addr;
+            proxy_set_header  X-Forwarded-For  $proxy_add_x_forwarded_for;
+            proxy_set_header  X-Forwarded-Protocol $scheme;
+        }
+    }
+
+}
+
+```
+And then do remember to;
+
+```
+sudo nginx -t # to check if the syntax is correct
+
+sudo nginx -s reload # reload the script to effect the changes
+```
+
+You can now visit your browser at *http://localhost* and you'll see 
+
+
+## Optimizing nginx for maximum performance 
+
+### Adjusting worker process and worker connections   
+
+Nginx can spin multiple worker processes to handle thousands of requests.
+To check the number of worker processes currently running, use the below command to get the status of nginx. 
+
+```
+sudo systemctl status nginx   
+
+```
+The output would be as below 
+
+```
+
+```
+From the screenshot above we can see that there are two worker processes, you might want to check the maximum number of processes you can spin with respect to the specs of your server. 
+To do that run the command below
+
+```
+nproc
+
+```
+For my case the maximum was 2, as such no need to adjust seeing that its the maximum. In case you want to adjust do that on the *worker_processes*  of the nginx.conf file
+
+```
+
+```
+
